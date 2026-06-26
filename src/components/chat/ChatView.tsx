@@ -22,6 +22,7 @@ export function ChatView({
   const stopStreaming = useChatsStore((s) => s.stopStreaming);
   const currentChatId = useChatsStore((s) => s.currentChatId);
   const chats = useChatsStore((s) => s.chats);
+  const setChatModel = useChatsStore((s) => s.setChatModel);
 
   const providers = useProvidersStore((s) => s.providers);
 
@@ -64,7 +65,14 @@ export function ChatView({
     <div className="flex h-full min-w-0 flex-1 flex-col">
       {/* Header */}
       <div className="flex h-12 items-center gap-2 border-b px-4">
-        <ModelSelector onOpenProviders={onOpenProviders} />
+        <ModelSelector
+          onOpenProviders={onOpenProviders}
+          providerId={chat?.providerId ?? null}
+          modelId={chat?.modelId ?? null}
+          onSelect={(pid, mid) => {
+            if (chat) void setChatModel(chat.id, pid, mid);
+          }}
+        />
         {chat?.modelId && (
           <span className="ml-auto text-xs text-muted-foreground">
             {chat.title}

@@ -15,7 +15,10 @@ interface ChatsState {
 
   loadChats: () => Promise<void>;
   selectChat: (id: string | null) => Promise<void>;
-  newChat: () => Promise<string>;
+  newChat: (
+    selProviderId?: string | null,
+    selModelId?: string | null
+  ) => Promise<string>;
   renameChat: (id: string, title: string) => Promise<void>;
   removeChat: (id: string) => Promise<void>;
   setChatModel: (
@@ -58,7 +61,7 @@ export const useChatsStore = create<ChatsState>((set, get) => ({
     }
   },
 
-  newChat: async () => {
+  newChat: async (selProviderId, selModelId) => {
     const chat = await db.createChat("New chat");
     set((s) => ({
       chats: [chat, ...s.chats],
@@ -66,25 +69,28 @@ export const useChatsStore = create<ChatsState>((set, get) => ({
       messages: [],
       error: null,
     }));
-    // Set default model from first available provider, if any.
+    // Resolve provider/model: explicit selection wins, otherwise fall back
+    // to the first available provider's first model.
     const providers = useProvidersStore.getState().providers;
-    if (providers.length > 0 && !chat.providerId) {
-      const p = providers[0];
-      const models = useProvidersStore.getState().modelsByProvider[p.id] ?? [];
-      const modelId = models[0]?.modelId ?? null;
-      if (modelId) {
-        await db.updateChat(chat.id, {
-          providerId: p.id,
-          modelId,
-        });
-        set((s) => ({
-          chats: s.chats.map((c) =>
-            c.id === chat.id
-              ? { ...c, providerId: p.id, modelId }
-              : c
-          ),
-        }));
-      }
+    let providerId = selProviderId ?? null;
+    let modelId = selModelId ?? null;
+    if ((!providerId || !modelId) && providers.length > 0) {
+      const p =
+        providers.find((pp) => pp.id === providerId) ?? providers[0];
+      const models =
+        useProvidersStore.getState().modelsByProvider[p.id] ?? [];
+      if (!providerId) providerId = p.id;
+      if (!modelId) modelId = models[0]?.modelId ?? null;
+    }
+    if (providerId && modelId) {
+      await db.updateChat(chat.id, { providerId, modelId });
+      set((s) => ({
+        chats: s.chats.map((c) =>
+          c.id === chat.id
+            ? { ...c, providerId, modelId }
+            : c
+        ),
+      }));
     }
     return chat.id;
   },

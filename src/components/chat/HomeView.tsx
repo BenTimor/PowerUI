@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { ArrowUp, MessageSquare, Plus, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowUp, MessageSquare, Sparkles } from "lucide-react";
 
 import { useChatsStore } from "@/stores/chatsStore";
 import { useProvidersStore } from "@/stores/providersStore";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { ModelSelector } from "./ModelSelector";
 
 /**
  * Shown when no chat is selected. Replaces the old behaviour of auto-creating
@@ -23,18 +24,41 @@ export function HomeView({
   const isStreaming = useChatsStore((s) => s.isStreaming);
 
   const providers = useProvidersStore((s) => s.providers);
+  const modelsByProvider = useProvidersStore((s) => s.modelsByProvider);
 
   const [input, setInput] = useState("");
+
+  // Pending provider/model selection for the next chat created from here.
+  const [providerId, setProviderId] = useState<string | null>(null);
+  const [modelId, setModelId] = useState<string | null>(null);
 
   const hasProvider = providers.length > 0;
   const recent = chats.slice(0, 6);
 
+  // Default to the first available provider's first model so the user can
+  // start typing immediately.
+  const defaultModel = useMemo(() => {
+    if (providers.length === 0) return null;
+    const p = providers[0];
+    const models = modelsByProvider[p.id] ?? [];
+    return { providerId: p.id, modelId: models[0]?.modelId ?? null };
+  }, [providers, modelsByProvider]);
+
+  useEffect(() => {
+    if (!providerId && defaultModel) {
+      setProviderId(defaultModel.providerId);
+      setModelId(defaultModel.modelId);
+    }
+  }, [defaultModel, providerId]);
+
   const handleStart = async () => {
     const text = input.trim();
     if (!text || isStreaming) return;
+    if (!providerId || !modelId) return;
     setInput("");
-    // Create a chat on demand (user-initiated) then send the first message.
-    await newChat();
+    // Create a chat on demand (user-initiated) with the chosen provider/model,
+    // then send the first message.
+    await newChat(providerId, modelId);
     await sendMessage(text);
   };
 
@@ -72,29 +96,30 @@ export function HomeView({
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Ask anything to start a new chat…"
-                  rows={2}
-                  className="min-h-[64px] resize-none border-0 bg-transparent pr-11 shadow-none focus-visible:ring-0"
+                  rows={1}
+                  className="min-h-[52px] resize-none border-0 bg-transparent pr-11 shadow-none focus-visible:ring-0"
                 />
-                <div className="absolute bottom-2 right-2 flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 gap-1.5"
-                    onClick={() => void newChat()}
-                    disabled={isStreaming}
-                    title="Start with an empty chat"
-                  >
-                    <Plus className="h-4 w-4" /> New chat
-                  </Button>
+                <div className="absolute bottom-2 right-2">
                   <Button
                     size="icon"
                     className="h-8 w-8"
-                    disabled={!input.trim() || isStreaming}
+                    disabled={!input.trim() || isStreaming || !modelId}
                     onClick={() => void handleStart()}
                   >
                     <ArrowUp className="h-4 w-4" />
                   </Button>
                 </div>
+              </div>
+              <div className="mt-2 flex justify-center">
+                <ModelSelector
+                  providerId={providerId}
+                  modelId={modelId}
+                  onSelect={(pid, mid) => {
+                    setProviderId(pid);
+                    setModelId(mid);
+                  }}
+                  onOpenProviders={onOpenProviders}
+                />
               </div>
               <p className="mt-2 text-center text-[11px] text-muted-foreground">
                 Press Enter to send · Shift+Enter for a new line

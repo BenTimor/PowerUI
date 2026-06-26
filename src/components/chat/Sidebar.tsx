@@ -3,7 +3,6 @@ import {
   Check,
   MessageSquare,
   Pencil,
-  Plus,
   Settings2,
   Trash2,
   X,
@@ -28,7 +27,6 @@ export function Sidebar({
   const chats = useChatsStore((s) => s.chats);
   const currentChatId = useChatsStore((s) => s.currentChatId);
   const selectChat = useChatsStore((s) => s.selectChat);
-  const newChat = useChatsStore((s) => s.newChat);
   const removeChat = useChatsStore((s) => s.removeChat);
   const renameChat = useChatsStore((s) => s.renameChat);
 
@@ -43,23 +41,18 @@ export function Sidebar({
 
   return (
     <div className="flex h-full w-full flex-col bg-sidebar text-sidebar-foreground">
-      {/* Brand */}
-      <div className="flex items-center gap-2 px-4 py-3.5">
+      {/* Brand — click to go home and start a new chat */}
+      <button
+        type="button"
+        onClick={() => void selectChat(null)}
+        className="flex w-full items-center gap-2 px-4 py-3.5 text-left transition-colors hover:bg-sidebar-accent/60"
+        title="New chat"
+      >
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
           <MessageSquare className="h-4 w-4" />
         </div>
         <span className="text-sm font-semibold tracking-tight">PowerUI</span>
-      </div>
-
-      <div className="px-3">
-        <Button
-          onClick={() => newChat()}
-          className="w-full justify-start gap-2"
-          size="sm"
-        >
-          <Plus className="h-4 w-4" /> New chat
-        </Button>
-      </div>
+      </button>
 
       <div className="mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <div className="px-2 pb-2 w-full min-w-0">

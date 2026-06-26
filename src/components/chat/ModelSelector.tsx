@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { ChevronsUpDown, Loader2, Search, Settings2 } from "lucide-react";
 
 import { useProvidersStore } from "@/stores/providersStore";
-import { useChatsStore } from "@/stores/chatsStore";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -12,9 +11,17 @@ import {
 import { cn } from "@/lib/utils";
 
 export function ModelSelector({
+  providerId,
+  modelId,
+  onSelect,
   onOpenProviders,
+  className,
 }: {
+  providerId?: string | null;
+  modelId?: string | null;
+  onSelect: (providerId: string, modelId: string) => void;
   onOpenProviders: () => void;
+  className?: string;
 }) {
   const providers = useProvidersStore((s) => s.providers);
   const modelsByProvider = useProvidersStore((s) => s.modelsByProvider);
@@ -22,15 +29,10 @@ export function ModelSelector({
   const refreshModels = useProvidersStore((s) => s.refreshModels);
   const getProvider = useProvidersStore((s) => s.getProvider);
 
-  const chats = useChatsStore((s) => s.chats);
-  const currentChatId = useChatsStore((s) => s.currentChatId);
-  const setChatModel = useChatsStore((s) => s.setChatModel);
-
-  const chat = chats.find((c) => c.id === currentChatId);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
-  const provider = chat ? getProvider(chat.providerId) : undefined;
+  const provider = providerId ? getProvider(providerId) : undefined;
   const anyRefreshing = Object.values(refreshing).some(Boolean);
 
   const groups = useMemo(() => {
@@ -50,9 +52,7 @@ export function ModelSelector({
       .filter((g) => g.models.length > 0);
   }, [providers, modelsByProvider, query]);
 
-  const triggerLabel = chat?.modelId
-    ? chat.modelId
-    : "Select a model";
+  const triggerLabel = modelId ? modelId : "Select a model";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -61,8 +61,11 @@ export function ModelSelector({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="h-8 max-w-[280px] justify-between gap-2 px-3 text-xs"
-        >
+          className={cn(
+            "h-8 max-w-[280px] justify-between gap-2 px-3 text-xs",
+            className
+          )
+        }>
           <span className="truncate font-normal">
             {provider && (
               <span className="text-muted-foreground">
@@ -124,7 +127,7 @@ export function ModelSelector({
               </div>
               {models.map((m) => {
                 const selected =
-                  chat?.providerId === p.id && chat?.modelId === m.modelId;
+                  providerId === p.id && modelId === m.modelId;
                 return (
                   <button
                     key={`${p.id}:${m.modelId}`}
@@ -133,9 +136,7 @@ export function ModelSelector({
                       selected && "bg-accent"
                     )}
                     onClick={() => {
-                      if (chat) {
-                        setChatModel(chat.id, p.id, m.modelId);
-                      }
+                      onSelect(p.id, m.modelId);
                       setQuery("");
                       setOpen(false);
                     }}
@@ -151,8 +152,8 @@ export function ModelSelector({
         <div className="border-t p-2">
           <CustomModelInput
             providerId={provider?.id ?? providers[0]?.id}
-            onPick={(providerId, modelId) => {
-              if (chat) setChatModel(chat.id, providerId, modelId);
+            onPick={(pid, mid) => {
+              onSelect(pid, mid);
               setQuery("");
               setOpen(false);
             }}
