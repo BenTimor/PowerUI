@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Check,
   MessageSquare,
@@ -12,7 +12,6 @@ import {
 import { useChatsStore } from "@/stores/chatsStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,11 +34,6 @@ export function Sidebar({
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
-
-  useEffect(() => {
-    newChat();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const commitRename = async (id: string) => {
     const v = renameValue.trim();
@@ -67,8 +61,8 @@ export function Sidebar({
         </Button>
       </div>
 
-      <ScrollArea className="mt-2 flex-1">
-        <div className="px-2 pb-2">
+      <div className="mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="px-2 pb-2 w-full min-w-0">
           {chats.length === 0 && (
             <div className="px-3 py-8 text-center text-xs text-muted-foreground">
               No chats yet.
@@ -81,7 +75,7 @@ export function Sidebar({
               <div
                 key={chat.id}
                 className={cn(
-                  "group relative flex items-center rounded-md transition-colors",
+                  "group relative flex w-full min-w-0 items-center gap-1 overflow-hidden rounded-md pr-1 transition-colors",
                   active
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "hover:bg-sidebar-accent/60"
@@ -125,8 +119,8 @@ export function Sidebar({
                       <DropdownMenuTrigger asChild>
                         <button
                           className={cn(
-                            "mr-1 rounded p-1 opacity-0 transition group-hover:opacity-100 hover:bg-sidebar-accent data-[state=open]:opacity-100",
-                            active && "opacity-60"
+                            "mr-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 text-muted-foreground opacity-60 transition hover:bg-sidebar-accent hover:text-foreground hover:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
+                            active && "opacity-80"
                           )}
                           onClick={(e) => e.stopPropagation()}
                         >
@@ -160,7 +154,7 @@ export function Sidebar({
             );
           })}
         </div>
-      </ScrollArea>
+      </div>
 
       <div className="border-t border-sidebar-border p-2">
         <Button

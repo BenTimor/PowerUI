@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ModelSelector } from "./ModelSelector";
 import { MessageBubble } from "./MessageBubble";
+import { HomeView } from "./HomeView";
 
 export function ChatView({
   onOpenProviders,
@@ -37,6 +38,11 @@ export function ChatView({
       el.scrollTop = el.scrollHeight;
     }
   }, [messages, isStreaming]);
+
+  // No chat selected → show the home page instead of an auto-created chat.
+  if (!currentChatId) {
+    return <HomeView onOpenProviders={onOpenProviders} />;
+  }
 
   const handleSend = () => {
     if (!input.trim() || isStreaming) return;
