@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Loader2, Square } from "lucide-react";
+import { ArrowUp, Loader2, PanelRightClose, PanelRightOpen, Square } from "lucide-react";
 
 import { useChatsStore } from "@/stores/chatsStore";
 import { useProvidersStore } from "@/stores/providersStore";
+import { useManagerStore } from "@/stores/managerStore";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ModelSelector } from "./ModelSelector";
@@ -11,18 +12,22 @@ import { HomeView } from "./HomeView";
 
 export function ChatView({
   onOpenProviders,
+  workspaceOpen,
+  onToggleWorkspace,
 }: {
   onOpenProviders: () => void;
+  workspaceOpen: boolean;
+  onToggleWorkspace: () => void;
 }) {
   const messages = useChatsStore((s) => s.messages);
-  const isStreaming = useChatsStore((s) => s.isStreaming);
-  const streamingMessageId = useChatsStore((s) => s.streamingMessageId);
   const error = useChatsStore((s) => s.error);
-  const sendMessage = useChatsStore((s) => s.sendMessage);
-  const stopStreaming = useChatsStore((s) => s.stopStreaming);
   const currentChatId = useChatsStore((s) => s.currentChatId);
   const chats = useChatsStore((s) => s.chats);
   const setChatModel = useChatsStore((s) => s.setChatModel);
+
+  const managerRunning = useManagerStore((s) => s.running);
+  const send = useManagerStore((s) => s.send);
+  const stop = useManagerStore((s) => s.stop);
 
   const providers = useProvidersStore((s) => s.providers);
 
@@ -33,12 +38,15 @@ export function ChatView({
   const hasModel = !!chat?.providerId && !!chat?.modelId;
 
   // Auto-scroll to bottom on new content.
+  const streamingMessageId = useChatsStore(
+    (s) => (managerRunning ? s.messages[s.messages.length - 1]?.id : null)
+  );
   useEffect(() => {
     const el = scrollRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages, isStreaming]);
+  }, [messages, managerRunning]);
 
   // No chat selected → show the home page instead of an auto-created chat.
   if (!currentChatId) {
@@ -46,10 +54,10 @@ export function ChatView({
   }
 
   const handleSend = () => {
-    if (!input.trim() || isStreaming) return;
+    if (!input.trim() || managerRunning) return;
     const text = input;
     setInput("");
-    void sendMessage(text);
+    void send(text);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -74,10 +82,23 @@ export function ChatView({
           }}
         />
         {chat?.modelId && (
-          <span className="ml-auto text-xs text-muted-foreground">
+          <span className="ml-auto truncate text-xs text-muted-foreground">
             {chat.title}
           </span>
         )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="ml-1 h-8 w-8"
+          onClick={onToggleWorkspace}
+          title={workspaceOpen ? "Hide workspace" : "Show workspace"}
+        >
+          {workspaceOpen ? (
+            <PanelRightClose className="h-4 w-4" />
+          ) : (
+            <PanelRightOpen className="h-4 w-4" />
+          )}
+        </Button>
       </div>
 
       {/* Messages */}
@@ -105,6 +126,13 @@ export function ChatView({
         </div>
       )}
 
+      {managerRunning && (
+        <div className="flex items-center gap-2 border-t px-4 py-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <span>Manager is working…</span>
+        </div>
+      )}
+
       {/* Input */}
       <div className="border-t px-4 py-3">
         <div className="mx-auto max-w-3xl">
@@ -115,19 +143,19 @@ export function ChatView({
               onKeyDown={handleKeyDown}
               placeholder={
                 hasModel
-                  ? "Message the model…  (Enter to send, Shift+Enter for newline)"
+                  ? "Message the manager…  (Enter to send, Shift+Enter for newline)"
                   : "Select a model above first…"
               }
               rows={1}
               className="max-h-48 min-h-[52px] resize-none border-0 bg-transparent pr-11 shadow-none focus-visible:ring-0"
             />
             <div className="absolute bottom-2 right-2">
-              {isStreaming ? (
+              {managerRunning ? (
                 <Button
                   size="icon"
                   variant="secondary"
                   className="h-8 w-8"
-                  onClick={stopStreaming}
+                  onClick={stop}
                   title="Stop"
                 >
                   <Square className="h-3.5 w-3.5" />
@@ -139,7 +167,7 @@ export function ChatView({
                   disabled={!input.trim() || !hasModel}
                   onClick={handleSend}
                 >
-                  {isStreaming ? (
+                  {managerRunning ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <ArrowUp className="h-4 w-4" />
@@ -149,8 +177,8 @@ export function ChatView({
             </div>
           </div>
           <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
-            Responses stream from your selected provider. Verify outputs before
-            use.
+            The manager can create tasks, assign sub-agents, and answer their
+            questions. Verify outputs before use.
           </p>
         </div>
       </div>

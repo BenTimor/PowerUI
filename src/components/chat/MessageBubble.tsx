@@ -5,6 +5,7 @@ import { Bot, Check, Copy, User } from "lucide-react";
 
 import type { Message } from "@/types";
 import { cn } from "@/lib/utils";
+import { ThinkingBlock } from "./ThinkingBlock";
 
 function MessageContent({ content }: { content: string }) {
   return (
@@ -70,15 +71,15 @@ export const MessageBubble = memo(function MessageBubble({
             </button>
           )}
         </div>
+        {!isUser && (
+          <ThinkingBlock messageId={message.id} live={streaming} />
+        )}
         {message.content ? (
           <MessageContent content={message.content} />
         ) : streaming ? (
-          <div className="flex items-center gap-1.5 py-1">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-muted-foreground" />
-            <span className="text-xs text-muted-foreground">
-              thinking…
-            </span>
-          </div>
+          // ThinkingBlock (above) shows the live working state; render
+          // nothing extra here to avoid a duplicate indicator.
+          null
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
         )}

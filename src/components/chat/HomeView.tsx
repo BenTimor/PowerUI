@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUp, MessageSquare, Sparkles } from "lucide-react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { ArrowUp, FolderPlus, MessageSquare, Sparkles, X } from "lucide-react";
 
 import { useChatsStore } from "@/stores/chatsStore";
+import { useManagerStore } from "@/stores/managerStore";
+import { useChatFoldersStore } from "@/stores/chatFoldersStore";
 import { useProvidersStore } from "@/stores/providersStore";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,14 +22,17 @@ export function HomeView({
 }) {
   const chats = useChatsStore((s) => s.chats);
   const newChat = useChatsStore((s) => s.newChat);
-  const sendMessage = useChatsStore((s) => s.sendMessage);
   const selectChat = useChatsStore((s) => s.selectChat);
-  const isStreaming = useChatsStore((s) => s.isStreaming);
+
+  const managerRunning = useManagerStore((s) => s.running);
+  const send = useManagerStore((s) => s.send);
+  const addFolder = useChatFoldersStore((s) => s.addFolder);
 
   const providers = useProvidersStore((s) => s.providers);
   const modelsByProvider = useProvidersStore((s) => s.modelsByProvider);
 
   const [input, setInput] = useState("");
+  const [pendingFolders, setPendingFolders] = useState<string[]>([]);
 
   // Pending provider/model selection for the next chat created from here.
   const [providerId, setProviderId] = useState<string | null>(null);
@@ -53,13 +59,31 @@ export function HomeView({
 
   const handleStart = async () => {
     const text = input.trim();
-    if (!text || isStreaming) return;
+    if (!text || managerRunning) return;
     if (!providerId || !modelId) return;
     setInput("");
     // Create a chat on demand (user-initiated) with the chosen provider/model,
-    // then send the first message.
-    await newChat(providerId, modelId);
-    await sendMessage(text);
+    // attach any selected folders, then send the first message via the
+    // manager so tool-calling / sub-agents are available from the start.
+    const chatId = await newChat(providerId, modelId);
+    for (const path of pendingFolders) {
+      await addFolder(chatId, path);
+    }
+    setPendingFolders([]);
+    await send(text);
+  };
+
+  const pickFolder = async () => {
+    try {
+      const picked = await openDialog({ directory: true, multiple: false });
+      if (typeof picked === "string" && picked) {
+        setPendingFolders((prev) =>
+          prev.includes(picked) ? prev : [...prev, picked]
+        );
+      }
+    } catch {
+      // user dismissed / cancelled
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -103,7 +127,7 @@ export function HomeView({
                   <Button
                     size="icon"
                     className="h-8 w-8"
-                    disabled={!input.trim() || isStreaming || !modelId}
+                    disabled={!input.trim() || managerRunning || !modelId}
                     onClick={() => void handleStart()}
                   >
                     <ArrowUp className="h-4 w-4" />
@@ -121,6 +145,48 @@ export function HomeView({
                   onOpenProviders={onOpenProviders}
                 />
               </div>
+
+              {/* Folders to attach to the new chat (agent working dirs) */}
+              <div className="mt-2">
+                {pendingFolders.length > 0 && (
+                  <div className="mb-1.5 flex flex-wrap gap-1">
+                    {pendingFolders.map((p) => {
+                      const label = p.split(/[\\/]/).pop() || p;
+                      return (
+                        <span
+                          key={p}
+                          className="inline-flex items-center gap-1 rounded bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                          title={p}
+                        >
+                          {label}
+                          <button
+                            type="button"
+                            className="hover:text-foreground"
+                            onClick={() =>
+                              setPendingFolders((prev) =>
+                                prev.filter((x) => x !== p)
+                              )
+                            }
+                            title="Remove folder"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void pickFolder()}
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  title="Add a working folder for agents"
+                >
+                  <FolderPlus className="h-3.5 w-3.5" />
+                  Add folder for agents
+                </button>
+              </div>
+
               <p className="mt-2 text-center text-[11px] text-muted-foreground">
                 Press Enter to send · Shift+Enter for a new line
               </p>

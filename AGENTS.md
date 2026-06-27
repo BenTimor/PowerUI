@@ -117,3 +117,71 @@ mode, likely via PI agents reusing the provider/model abstraction already
 in `lib/api/openai.ts` + `providersStore`. When adding agent features,
 keep them behind the existing provider configuration flow rather than a
 separate one.
+
+## Agent workspace (implemented)
+
+Every chat is an **agent workspace**. The chat assistant is a **manager**
+that can create tasks, assign them to per-chat **sub-agents**, and react to
+sub-agent events. Sub-agents run in the background and operate on the
+chat's **folders** (working directories). All capabilities are available in
+every chat (no opt-in mode).
+
+### Data model (migration `002_agents.sql`)
+`chat_folders`, `tasks`, `sub_agents`, `agent_runs`, `agent_events`. CRUD
+lives in `lib/db.ts`. `agent_runs` allows multiple concurrent rows per
+`sub_agent_id` (one per assigned task). `agent_events` carry the
+sub-agent↔manager message/question/answer/task_complete traffic; rows with
+`pending=1` are blocking questions awaiting an answer.
+
+### Runtime (`src/lib/agent/`)
+- `types.ts` — `runAgentLoop(opts)`: an OpenAI-compatible tool-calling loop
+  (non-streaming `chatCompletion` from `lib/api/openai.ts`). Supports
+  `initialMessages` (full history), a `mailbox()` hook drained each turn so a
+  caller can inject messages into a *running* loop, and stops on the
+  `complete_task` tool / maxTurns / abort.
+- `subAgentTools.ts` — `buildSubAgentTools({chatId,runId,taskId,roots})`:
+  `read_file`/`list_files`/`write_file`/`edit_file`/`delete_file` (path-safe
+  via `lib/files.ts` `createFileTools`, which rejects `..` escapes), plus
+  `send_message_to_manager` (non-blocking), `ask_manager` (blocking — awaits
+  a `agentBus.deliverAnswer`), and `complete_task`.
+- `managerTools.ts` — `buildManagerTools(chatId)`: `create_task`, `list_tasks`,
+  `assign_task` (launches a sub-agent run), `update_task`, `list_sub_agents`,
+  `list_folders`, `answer_question`.
+- `bus.ts` — in-memory `agentBus` singleton (per-chat pub/sub + pending
+  question resolvers). No zustand imports.
+
+### Stores
+- `chatFoldersStore`, `tasksStore`, `subAgentsStore`, `agentActivityStore`,
+  `managerStore` — each auto-loads on `chatsStore.currentChatId` change via a
+  module-scope subscription.
+- `agentActivityStore.launchSubAgent` creates an `agent_run`, marks the task
+  `in_progress`, runs `runAgentLoop` **detached** (returns immediately), and
+  on completion sets the task `done` + emits a `task_complete` event.
+  `answerQuestion(eventId, answer)` persists the answer and resolves the
+  blocking `ask_manager` promise via `agentBus.deliverAnswer`.
+- `managerStore` is the chat assistant. `send(text)` persists the user
+  message then runs a manager turn; if a turn is already active it injects
+  into the running loop's mailbox instead of starting a new one. It
+  subscribes to `agentBus`: a `sub_to_manager` event starts a manager turn
+  when idle, or is injected when active. Manager replies stream into the
+  chat as assistant messages.
+
+### UI
+`WorkspacePanel` (right sidebar, collapsible) hosts tabs: `FoldersPanel`,
+`TasksPanel`, `SubAgentsPanel` (+`SubAgentEditor`), `ActivityPanel`. The
+activity panel lists pending questions (answer inline), active runs
+(cancel), an event log, and a manual sub-agent launch control. `ChatView`
+sends via `useManagerStore.send` and uses `managerStore.running`/`stop`
+for the send/stop button.
+
+### Gotchas
+- The manager and sub-agents use **non-streaming** completions (tool calling).
+  Manager text appears per assistant step, not token-by-token.
+- `ask_manager` blocking has a theoretical (practically impossible) race if
+  the manager answered before the sub-agent registered its resolver; the
+  manager always performs a model round-trip first, so this never happens in
+  practice.
+- `lib/files.ts` canonicalizes `.`/`..` lexically; never bypass
+  `createFileTools`/`resolveWithinRoots` when touching user folders.
+- `chatsStore.sendMessage`/`isStreaming`/`stopStreaming` are the legacy
+  non-agent streaming path, retained but no longer wired to the UI.

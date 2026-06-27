@@ -88,6 +88,94 @@ export async function listRemoteModels(
   return list.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+// ---- Non-streaming tool-aware completion --------------------------------
+
+export interface FunctionToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+export interface AssistantToolMessage {
+  role: "assistant";
+  content: string | null;
+  tool_calls?: FunctionToolCall[];
+}
+
+export interface ToolResultMessage {
+  role: "tool";
+  tool_call_id: string;
+  content: string;
+}
+
+export type LoopMessage =
+  | ChatCompletionMessage
+  | AssistantToolMessage
+  | ToolResultMessage;
+
+export interface ToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>; // JSON schema
+  };
+}
+
+/** Non-streaming chat completion with optional function tools. Returns the
+ *  raw assistant message (may carry tool_calls). */
+export async function chatCompletion(opts: {
+  baseUrl: string;
+  apiKey: string | null;
+  model: string;
+  messages: LoopMessage[];
+  tools?: ToolDefinition[];
+  temperature?: number;
+  signal?: AbortSignal;
+}): Promise<AssistantToolMessage> {
+  const url = joinChatPath(opts.baseUrl);
+  const body: Record<string, unknown> = {
+    model: opts.model,
+    messages: opts.messages,
+    stream: false,
+  };
+  if (opts.tools && opts.tools.length > 0) body.tools = opts.tools;
+  if (opts.temperature !== undefined) body.temperature = opts.temperature;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: authHeaders(opts.apiKey),
+    body: JSON.stringify(body),
+    signal: opts.signal,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Chat request failed (${res.status}): ${text || res.statusText}`
+    );
+  }
+
+  const data = (await res.json()) as {
+    choices?: Array<{
+      message?: {
+        role?: string;
+        content?: string | null;
+        tool_calls?: FunctionToolCall[];
+      };
+    }>;
+  };
+  const msg = data.choices?.[0]?.message;
+  if (!msg) {
+    throw new Error("Chat response missing choices[0].message");
+  }
+  return {
+    role: "assistant",
+    content: msg.content ?? null,
+    ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}),
+ };
+}
+
 /**
  * Stream a chat completion, invoking onDelta for each text chunk.
  * Returns the full assembled text once the stream closes.
