@@ -10,6 +10,8 @@
     "sql:allow-execute",
     "sql:allow-select",
     "dialog:default",
+    "dialog:allow-confirm",
+    "dialog:allow-ask",
     {
       "identifier": "fs:scope",
       "allow": [

@@ -12,6 +12,8 @@ import type {
   ModelEntry,
   Provider,
   RunStatus,
+  RunStep,
+  RunStepKind,
   SubAgent,
   Task,
   TaskStatus,
@@ -131,6 +133,9 @@ function rowToAgentRun(r: Record<string, unknown>): AgentRun {
     error: (r.error as string) ?? "",
     startedAt: r.started_at as number,
     endedAt: (r.ended_at as number) ?? null,
+    // Added in migration 005; default for rows created before it.
+    messagesJson: (r.messages_json as string) ?? "[]",
+    turn: (r.turn as number) ?? 0,
   };
 }
 
@@ -196,6 +201,34 @@ export async function updateProvider(
 export async function deleteProvider(id: string): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM providers WHERE id = ?", [id]);
+}
+
+// ---- App settings ----
+
+export async function getAppSetting(key: string): Promise<string | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT value FROM app_settings WHERE key = ? LIMIT 1",
+    [key]
+  );
+  if (rows.length === 0) return null;
+  return (rows[0].value as string) ?? null;
+}
+
+export async function setAppSetting(
+  key: string,
+  value: string | null
+): Promise<void> {
+  const db = await getDb();
+  if (value == null || value === "") {
+    await db.execute("DELETE FROM app_settings WHERE key = ?", [key]);
+    return;
+  }
+  await db.execute(
+    "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) " +
+      "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    [key, value, Date.now()]
+  );
 }
 
 // ---- Models (cached) ----
@@ -564,6 +597,27 @@ export async function listAgentRuns(chatId: string): Promise<AgentRun[]> {
   return rows.map(rowToAgentRun);
 }
 
+/** Most recent runs across ALL chats, newest first. Used by the sidebar to
+ *  surface active + recently-finished sub-agent runs under each chat. */
+export async function listRecentAgentRuns(limit = 200): Promise<AgentRun[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM agent_runs ORDER BY started_at DESC LIMIT ?",
+    [limit]
+  );
+  return rows.map(rowToAgentRun);
+}
+
+/** All currently-running runs across all chats. Polled by the sidebar so a
+ *  chat with an active sub-agent shows a live indicator even when not open. */
+export async function listRunningAgentRuns(): Promise<AgentRun[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM agent_runs WHERE status = 'running' ORDER BY started_at DESC"
+  );
+  return rows.map(rowToAgentRun);
+}
+
 export async function createAgentRun(input: {
   chatId: string;
   subAgentId: string;
@@ -573,7 +627,7 @@ export async function createAgentRun(input: {
   const id = genId();
   const now = Date.now();
   await db.execute(
-    "INSERT INTO agent_runs (id, chat_id, sub_agent_id, task_id, status, started_at) VALUES (?, ?, ?, ?, 'running', ?)",
+    "INSERT INTO agent_runs (id, chat_id, sub_agent_id, task_id, status, started_at, messages_json, turn) VALUES (?, ?, ?, ?, 'running', ?, '[]', 0)",
     [id, input.chatId, input.subAgentId, input.taskId, now]
   );
   return {
@@ -586,12 +640,14 @@ export async function createAgentRun(input: {
     error: "",
     startedAt: now,
     endedAt: null,
+    messagesJson: "[]",
+    turn: 0,
   };
 }
 
 export async function updateAgentRun(
   id: string,
-  input: Partial<Pick<AgentRun, "status" | "result" | "error" | "endedAt">>
+  input: Partial<Pick<AgentRun, "status" | "result" | "error" | "endedAt" | "messagesJson" | "turn">>
 ): Promise<void> {
   const db = await getDb();
   const fields: string[] = [];
@@ -600,6 +656,8 @@ export async function updateAgentRun(
   if (input.result !== undefined) { fields.push("result = ?"); values.push(input.result); }
   if (input.error !== undefined) { fields.push("error = ?"); values.push(input.error); }
   if (input.endedAt !== undefined) { fields.push("ended_at = ?"); values.push(input.endedAt); }
+  if (input.messagesJson !== undefined) { fields.push("messages_json = ?"); values.push(input.messagesJson); }
+  if (input.turn !== undefined) { fields.push("turn = ?"); values.push(input.turn); }
   if (!fields.length) return;
   values.push(id);
   await db.execute(
@@ -672,4 +730,69 @@ export async function answerAgentEvent(
       "SELECT ?, chat_id, run_id, 'manager_to_sub', 'answer', ?, 0, ? FROM agent_events WHERE id = ?",
     [genId(), answerContent, now, id]
   );
+}
+
+// ---- Run steps (trace) ----
+
+function rowToRunStep(r: Record<string, unknown>): RunStep {
+  return {
+    id: r.id as string,
+    runId: r.run_id as string,
+    kind: r.kind as RunStepKind,
+    text: (r.text as string) ?? "",
+    toolName: (r.tool_name as string) ?? null,
+    toolArgs: (r.tool_args as string) ?? null,
+    toolResult: (r.tool_result as string) ?? null,
+    turn: (r.turn as number) ?? 0,
+    createdAt: r.created_at as number,
+  };
+}
+
+export async function createRunStep(input: {
+  runId: string;
+  kind: RunStepKind;
+  text?: string | null;
+  toolName?: string | null;
+  toolArgs?: string | null;
+  toolResult?: string | null;
+  turn?: number;
+}): Promise<RunStep> {
+  const db = await getDb();
+  const id = genId();
+  const now = Date.now();
+  await db.execute(
+    "INSERT INTO run_steps (id, run_id, kind, text, tool_name, tool_args, tool_result, turn, created_at) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [
+      id,
+      input.runId,
+      input.kind,
+      input.text ?? null,
+      input.toolName ?? null,
+      input.toolArgs ?? null,
+      input.toolResult ?? null,
+      input.turn ?? 0,
+      now,
+    ]
+  );
+  return {
+    id,
+    runId: input.runId,
+    kind: input.kind,
+    text: input.text ?? "",
+    toolName: input.toolName ?? null,
+    toolArgs: input.toolArgs ?? null,
+    toolResult: input.toolResult ?? null,
+    turn: input.turn ?? 0,
+    createdAt: now,
+  };
+}
+
+export async function listRunSteps(runId: string): Promise<RunStep[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM run_steps WHERE run_id = ? ORDER BY created_at ASC",
+    [runId]
+  );
+  return rows.map(rowToRunStep);
 }

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import {
+  Globe,
+  KeyRound,
   Loader2,
   Pencil,
   Plus,
@@ -53,6 +55,8 @@ export function ProviderSettingsDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const {
+    exaApiKey,
+    setExaApiKey,
     providers,
     modelsByProvider,
     refreshing,
@@ -60,6 +64,12 @@ export function ProviderSettingsDialog({
     removeProvider,
   } = useProvidersStore();
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [exaKeyDraft, setExaKeyDraft] = useState(exaApiKey ?? "");
+  const [savingExa, setSavingExa] = useState(false);
+
+  useEffect(() => {
+    setExaKeyDraft(exaApiKey ?? "");
+  }, [exaApiKey, open]);
 
   const closeEditor = () => setEditor(null);
 
@@ -106,6 +116,53 @@ export function ProviderSettingsDialog({
               <Plus className="h-3.5 w-3.5" /> {p.name}
             </Button>
           ))}
+        </div>
+
+        <Separator />
+
+        <div className="rounded-lg border p-3">
+          <div className="mb-3 flex items-start gap-2">
+            <Globe className="mt-0.5 h-4 w-4 text-muted-foreground" />
+            <div>
+              <div className="font-medium">Exa web access</div>
+              <div className="text-xs text-muted-foreground">
+                Used by the chat manager and sub-agents for web_search and web_fetch.
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <div className="min-w-0 flex-1">
+              <Label htmlFor="exa-key" className="sr-only">
+                Exa API key
+              </Label>
+              <Input
+                id="exa-key"
+                type="password"
+                placeholder="Exa API key"
+                value={exaKeyDraft}
+                onChange={(e) => setExaKeyDraft(e.target.value)}
+              />
+            </div>
+            <Button
+              variant="secondary"
+              disabled={savingExa || exaKeyDraft.trim() === (exaApiKey ?? "")}
+              onClick={async () => {
+                setSavingExa(true);
+                try {
+                  await setExaApiKey(exaKeyDraft);
+                } finally {
+                  setSavingExa(false);
+                }
+              }}
+            >
+              {savingExa ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <KeyRound className="h-4 w-4" />
+              )}
+              Save
+            </Button>
+          </div>
         </div>
 
         <Separator />

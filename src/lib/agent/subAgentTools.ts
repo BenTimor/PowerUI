@@ -2,6 +2,7 @@ import { createAgentEvent } from "@/lib/db";
 import { createFileTools, formatReadFilePage, readFilePaged } from "@/lib/files";
 import { agentBus } from "@/lib/agent/bus";
 import type { Tool } from "@/lib/agent/types";
+import { buildExaWebTools } from "@/lib/agent/webTools";
 
 const MAX_LIST = 8000;
 
@@ -218,6 +219,7 @@ export function buildSubAgentTools(opts: {
     write_file,
     edit_file,
     delete_file,
+    ...buildExaWebTools(),
     send_message_to_manager,
     ask_manager,
     complete_task,

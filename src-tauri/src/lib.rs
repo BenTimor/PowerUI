@@ -27,6 +27,24 @@ pub fn run() {
             sql: include_str!("../migrations/003_model_preferences.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "global application settings",
+            sql: include_str!("../migrations/004_app_settings.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 5,
+            description: "run_steps: full step-by-step trace of sub-agent runs",
+            sql: include_str!("../migrations/005_run_traces.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 6,
+            description: "agent_runs.turn: per-run loop turn counter for resume",
+            sql: include_str!("../migrations/006_agent_runs_turn.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

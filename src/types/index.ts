@@ -86,6 +86,11 @@ export interface AgentRun {
   error: string;
   startedAt: number;
   endedAt: number | null;
+  /** JSON-serialized working message list (system + history + tool msgs).
+   *  Used to RESUME a stopped/finished run. Kept in sync each turn. */
+  messagesJson: string;
+  /** Loop turn count at last save, so resume doesn't re-burn the turn budget. */
+  turn: number;
 }
 
 export type EventDirection =
@@ -109,6 +114,31 @@ export interface AgentEvent {
   pending: boolean;
   createdAt: number;
   answeredAt: number | null;
+}
+
+/** A single step in a sub-agent run's ReAct loop, persisted so the full
+ *  trace can be rendered in the sidebar trace view and replayed on resume. */
+export type RunStepKind =
+  | "thought"
+  | "tool_call"
+  | "tool_result"
+  | "assistant_text"
+  | "finished"
+  | "error"
+  | "paused" // run was stopped mid-flight
+  | "resumed" // run was woken and is continuing
+  | "steered"; // a steering message was injected into the run
+
+export interface RunStep {
+  id: string;
+  runId: string;
+  kind: RunStepKind;
+  text: string;
+  toolName: string | null;
+  toolArgs: string | null;
+  toolResult: string | null;
+  turn: number;
+  createdAt: number;
 }
 
 /** A model paired with its provider for display/selection. */

@@ -6,6 +6,7 @@ import { listRemoteModels } from "@/lib/api/openai";
 
 interface ProvidersState {
   providers: Provider[];
+  exaApiKey: string | null;
   /** Models keyed by provider id. */
   modelsByProvider: Record<string, ModelEntry[]>;
   loading: boolean;
@@ -30,10 +31,14 @@ interface ProvidersState {
   toggleModelStar: (modelDbId: number) => Promise<void>;
   setDefaultModel: (providerId: string, modelId: string) => Promise<void>;
   getDefaultModel: () => { providerId: string; modelId: string } | null;
+  setExaApiKey: (apiKey: string | null) => Promise<void>;
 }
+
+export const EXA_API_KEY_SETTING = "exa_api_key";
 
 export const useProvidersStore = create<ProvidersState>((set, get) => ({
   providers: [],
+  exaApiKey: null,
   modelsByProvider: {},
   loading: false,
   refreshing: {},
@@ -42,11 +47,12 @@ export const useProvidersStore = create<ProvidersState>((set, get) => ({
     set({ loading: true });
     try {
       const providers = await db.listProviders();
+      const exaApiKey = await db.getAppSetting(EXA_API_KEY_SETTING);
       const modelsByProvider: Record<string, ModelEntry[]> = {};
       for (const p of providers) {
         modelsByProvider[p.id] = await db.listModels(p.id);
       }
-      set({ providers, modelsByProvider });
+      set({ providers, modelsByProvider, exaApiKey });
     } finally {
       set({ loading: false });
     }
@@ -183,5 +189,11 @@ export const useProvidersStore = create<ProvidersState>((set, get) => ({
       }
     }
     return null;
+  },
+
+  setExaApiKey: async (apiKey) => {
+    const normalized = apiKey?.trim() || null;
+    await db.setAppSetting(EXA_API_KEY_SETTING, normalized);
+    set({ exaApiKey: normalized });
   },
 }));

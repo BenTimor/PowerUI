@@ -45,12 +45,25 @@ export interface RunAgentOptions {
    *  external caller can inject information into a running loop. */
   mailbox?: () => LoopMessage[];
   /** Optional pre-built message list (including a system message). If
-   *  provided, REPLACES the default [system, userMessage] construction. */
+   *  provided, REPLACES the default [system, userMessage] construction.
+   *  Used by the manager turn AND to RESUME a previously-stopped sub-agent run
+   *  (pass the saved messages + a resume instruction). */
   initialMessages?: LoopMessage[];
+  /** Loop turn index to start counting from. Used when RESUMING a run so the
+   *  turn budget applies to NEW turns only, not the replayed history. */
+  startingTurn?: number;
+  /** Called at the END of each turn with the current working message list,
+   *  so callers can checkpoint progress (e.g. to resume after a mid-flight
+   *  abort). NOT called on the terminal/started turn. */
+  onCheckpoint?: (messages: LoopMessage[], turn: number) => void;
 }
 
 export interface RunAgentResult {
   finalText: string;
+  /** The full working message list at the end of the loop. Persisted by the
+   *  caller so a stopped/finished run can be RESUMED later by passing it back
+   *  as `initialMessages` (with a resume instruction appended). */
+  messages: LoopMessage[];
 }
 
 const MAX_RESULT = 2000;
@@ -90,6 +103,8 @@ export async function runAgentLoop(
     mailbox,
   } = opts;
   const maxTurns = opts.maxTurns ?? 25;
+  const startTurn = opts.startingTurn ?? 0;
+  const onCheckpoint = opts.onCheckpoint;
   const emit = (e: AgentLoopEvent) => onEvent?.(e);
   const toolDefs = tools.map(toToolDefinition);
   const byName = new Map(tools.map((t) => [t.name, t] as const));
@@ -100,8 +115,9 @@ export async function runAgentLoop(
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ];
+  let turn = startTurn;
 
-  for (let turn = 0; turn < maxTurns; turn++) {
+  for (; turn - startTurn < maxTurns; turn++) {
     if (signal?.aborted) {
       throw new DOMException("aborted", "AbortError");
     }
@@ -163,9 +179,13 @@ export async function runAgentLoop(
       }
 
       emit({ kind: "finished", finalText: content });
-      return { finalText: content };
+      return { finalText: content, messages };
     }
 
+    // Non-terminal turn with tool calls. Any accompanying text is a ReAct
+    // "thought" — it stays in the transcript (pushed above) for the model's
+    // next-turn coherence, but is surfaced separately so callers can show it
+    // as transient reasoning rather than a finished message.
     // Non-terminal turn with tool calls. Any accompanying text is a ReAct
     // "thought" — it stays in the transcript (pushed above) for the model's
     // next-turn coherence, but is surfaced separately so callers can show it
@@ -212,11 +232,15 @@ export async function runAgentLoop(
       if (call.function.name === "complete_task") {
         const summary = result !== "task_completed" ? result : "";
         emit({ kind: "finished", finalText: summary });
-        return { finalText: summary };
+        return { finalText: summary, messages };
       }
     }
+
+    // Checkpoint after a full turn with tool calls so a mid-flight abort can
+    // resume from the last completed turn.
+    onCheckpoint?.(messages, turn + 1);
   }
 
   // Exceeded maxTurns without a terminal message.
-  return { finalText: "" };
+  return { finalText: "", messages };
 }

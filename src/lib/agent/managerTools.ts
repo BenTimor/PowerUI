@@ -1,18 +1,21 @@
 import type { Tool } from "@/lib/agent/types";
 import { createFileTools, formatReadFilePage, readFilePaged } from "@/lib/files";
+import { runRuntime } from "@/lib/agent/runRuntime";
 import { useTasksStore } from "@/stores/tasksStore";
 import { useSubAgentsStore } from "@/stores/subAgentsStore";
 import { useChatFoldersStore } from "@/stores/chatFoldersStore";
 import { useAgentActivityStore } from "@/stores/agentActivityStore";
+import { waitForSubagentUpdate } from "@/stores/managerStore";
+import { buildExaWebTools } from "@/lib/agent/webTools";
 
 function strArg(args: Record<string, unknown>, key: string): string {
   const v = args[key];
   return typeof v === "string" ? v : v == null ? "" : String(v);
 }
 
-/** Return a fresh, read-only FileTools bundle scoped to the chat's current
- *  folder roots. Returns null when no folders are configured. */
-function readOnlyFileTools() {
+/** Return a fresh FileTools bundle scoped to the chat's current folder roots.
+ *  Returns null when no folders are configured. */
+function workspaceFileTools() {
   const roots = useChatFoldersStore.getState().folders.map((f) => f.path);
   if (roots.length === 0) return null;
   return createFileTools(roots);
@@ -273,7 +276,7 @@ export function buildManagerTools(chatId: string): Tool[] {
     async execute(args) {
       const path = strArg(args, "path");
       if (!path) return "Error: path is required";
-      const files = readOnlyFileTools();
+      const files = workspaceFileTools();
       if (!files)
         return "Error: no workspace folders configured for this chat";
       const offset =
@@ -301,7 +304,7 @@ export function buildManagerTools(chatId: string): Tool[] {
     async execute(args) {
       const path = strArg(args, "path");
       if (!path) return "Error: path is required";
-      const files = readOnlyFileTools();
+      const files = workspaceFileTools();
       if (!files)
         return "Error: no workspace folders configured for this chat";
       try {
@@ -317,6 +320,218 @@ export function buildManagerTools(chatId: string): Tool[] {
       } catch (err) {
         return `Error: ${err instanceof Error ? err.message : String(err)}`;
       }
+    },
+  };
+
+  const write_file: Tool = {
+    name: "write_file",
+    description:
+      "Write text content to a file within one of the chat's workspace folders (creates or overwrites). Prefer delegating file edits to sub-agents; use directly for small, obvious edits.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        content: { type: "string" },
+      },
+      required: ["path", "content"],
+    },
+    async execute(args) {
+      const path = strArg(args, "path");
+      const content = strArg(args, "content");
+      if (!path) return "Error: path is required";
+      const files = workspaceFileTools();
+      if (!files)
+        return "Error: no workspace folders configured for this chat";
+      try {
+        await files.writeTextFile(path, content);
+        return `wrote ${path}`;
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  const edit_file: Tool = {
+    name: "edit_file",
+    description:
+      "Replace the first unique occurrence of old_text with new_text in a file within one of the chat's workspace folders. Prefer delegating file edits to sub-agents; use directly for small, obvious edits.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        old_text: { type: "string" },
+        new_text: { type: "string" },
+      },
+      required: ["path", "old_text", "new_text"],
+    },
+    async execute(args) {
+      const path = strArg(args, "path");
+      const oldText = strArg(args, "old_text");
+      const newText = strArg(args, "new_text");
+      if (!path) return "Error: path is required";
+      const files = workspaceFileTools();
+      if (!files)
+        return "Error: no workspace folders configured for this chat";
+      try {
+        await files.editFile(path, oldText, newText);
+        return "edited";
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  const delete_file: Tool = {
+    name: "delete_file",
+    description:
+      "Delete a file within one of the chat's workspace folders. Prefer delegating file edits to sub-agents; use directly for small, obvious edits.",
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+    },
+    async execute(args) {
+      const path = strArg(args, "path");
+      if (!path) return "Error: path is required";
+      const files = workspaceFileTools();
+      if (!files)
+        return "Error: no workspace folders configured for this chat";
+      try {
+        await files.removeFile(path);
+        return "deleted";
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  const list_subagent_runs: Tool = {
+    name: "list_subagent_runs",
+    description:
+      "List the sub-agent runs in this chat with their status, the sub-agent name, the task, how many tool calls they've made, and a one-line preview of their latest activity. Use this to inspect running OR finished sub-agents you have launched. Each line: '- [<status>] <name> on <task> (run <id>, <n> tools, last: <preview>)'. Pending blocking questions are flagged.",
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      const { runs, events } = useAgentActivityStore.getState();
+      const { subAgents } = useSubAgentsStore.getState();
+      const { tasks } = useTasksStore.getState();
+      const mine = runs.filter((r) => r.chatId === chatId);
+      if (mine.length === 0) return "(no sub-agent runs)";
+      const pendingQs = new Set(
+        events
+          .filter((e) => e.kind === "question" && e.pending && e.runId)
+          .map((e) => e.runId!)
+      );
+      const lines = mine.map((r) => {
+        const sa = subAgents.find((a) => a.id === r.subAgentId);
+        const name = sa?.name ?? r.subAgentId.slice(0, 8);
+        const task = tasks.find((t) => t.id === r.taskId)?.title ?? r.taskId;
+        const flag = pendingQs.has(r.id) ? " [PENDING QUESTION]" : "";
+        return `- [${r.status}] ${name} on '${task}' (run ${r.id}${flag})`;
+      });
+      return lines.join("\n");
+    },
+  };
+
+  const steer_subagent: Tool = {
+    name: "steer_subagent",
+    description:
+      "Inject a steering user-message into a RUNNING sub-agent's conversation. The message is delivered on the run's next turn (non-blocking). Use this to redirect, add context, or correct a sub-agent mid-flight without stopping it. Returns 'steered' or an error if the run is not currently running.",
+    parameters: {
+      type: "object",
+      properties: {
+        run_id: { type: "string" },
+        message: { type: "string" },
+      },
+      required: ["run_id", "message"],
+    },
+    async execute(args) {
+      const runId = strArg(args, "run_id");
+      const message = strArg(args, "message");
+      if (!runId || !message)
+        return "Error: run_id and message are required";
+      const ok = await useAgentActivityStore
+        .getState()
+        .steerRun(runId, message);
+      return ok ? "steered" : "Error: run is not currently running";
+    },
+  };
+
+  const stop_subagent: Tool = {
+    name: "stop_subagent",
+    description:
+      "Stop a RUNNING sub-agent. The run is paused (not destroyed): its conversation is saved and can be resumed later with wake_subagent. Use this when a sub-agent is going off-track or you want to take over. Returns 'stopped' or 'not running'.",
+    parameters: {
+      type: "object",
+      properties: { run_id: { type: "string" } },
+      required: ["run_id"],
+    },
+    async execute(args) {
+      const runId = strArg(args, "run_id");
+      if (!runId) return "Error: run_id is required";
+      const wasActive = runRuntime.isActive(runId);
+      useAgentActivityStore.getState().cancelRun(runId);
+      return wasActive ? "stopped" : "not running";
+    },
+  };
+
+  const wait_for_subagent: Tool = {
+    name: "wait_for_subagent",
+    description:
+      "BLOCK until a running sub-agent sends you an update (a message, a question, or a task_complete) or until a run finishes/fails, or until the timeout. Use this INSTEAD of repeatedly calling list_subagent_runs to poll — you will be returned a description of what happened. Pass run_id to wait for a specific run, or omit to wait for ANY of your running sub-agents. The chat is also auto-woken on sub-agent events even if you don't call this, so the preferred pattern is: assign_task, then end your turn (give your final reply or just stop talking) and you'll be resumed automatically. Use this tool only when you have NOTHING useful to do but wait and want to be woken with the specific update.",
+    parameters: {
+      type: "object",
+      properties: {
+        run_id: {
+          type: "string",
+          description:
+            "Optional: wait for a specific run id. If omitted, waits for any of your running sub-agent runs.",
+        },
+        timeout_seconds: {
+          type: "number",
+          description:
+            "Max seconds to wait. Default 120. Returns early with 'timed out' if nothing happens.",
+        },
+      },
+      required: [],
+    },
+    async execute(args) {
+      const wantRunId = strArg(args, "run_id") || null;
+      const timeoutSeconds =
+        typeof args.timeout_seconds === "number" && args.timeout_seconds > 0
+          ? (args.timeout_seconds as number)
+          : undefined;
+      return await waitForSubagentUpdate({
+        chatId,
+        runId: wantRunId,
+        timeoutSeconds,
+      });
+    },
+  };
+
+  const wake_subagent: Tool = {
+    name: "wake_subagent",
+    description:
+      "Wake (resume) a stopped or finished sub-agent on the SAME run thread. It replays the run's saved conversation history and continues from where it left off, with the given instruction. Use this to continue work after a stop, or to follow up on a completed run. A NEW task should NOT reuse an old run — create a new task and assign_task instead. Returns 'woken' or an error.",
+    parameters: {
+      type: "object",
+      properties: {
+        run_id: { type: "string" },
+        instruction: {
+          type: "string",
+          description:
+            "How the sub-agent should continue. Defaults to 'continue working on this task' if empty.",
+        },
+      },
+      required: ["run_id"],
+    },
+    async execute(args) {
+      const runId = strArg(args, "run_id");
+      const instruction = strArg(args, "instruction");
+      if (!runId) return "Error: run_id is required";
+      const ok = await useAgentActivityStore
+        .getState()
+        .wakeRun(runId, instruction || "Continue working on this task.");
+      return ok ? "woken" : "Error: could not wake run (not found, still running, or no provider/model)";
     },
   };
 
@@ -357,6 +572,15 @@ export function buildManagerTools(chatId: string): Tool[] {
     list_folders,
     read_file,
     list_files,
+    write_file,
+    edit_file,
+    delete_file,
+    ...buildExaWebTools(),
     answer_question,
+    list_subagent_runs,
+    wait_for_subagent,
+    steer_subagent,
+    stop_subagent,
+    wake_subagent,
   ];
 }
