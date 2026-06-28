@@ -14,6 +14,8 @@ export interface ModelEntry {
   providerId: string;
   modelId: string;
   label: string | null;
+  starred: boolean;
+  isDefault: boolean;
   createdAt: number;
 }
 

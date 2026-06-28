@@ -55,6 +55,8 @@ function rowToModel(r: Record<string, unknown>): ModelEntry {
     providerId: r.provider_id as string,
     modelId: r.model_id as string,
     label: (r.label as string) ?? null,
+    starred: (r.starred as number) === 1,
+    isDefault: (r.is_default as number) === 1,
     createdAt: r.created_at as number,
   };
 }
@@ -213,13 +215,65 @@ export async function replaceModels(
 ): Promise<void> {
   const db = await getDb();
   const now = Date.now();
-  await db.execute("DELETE FROM models WHERE provider_id = ?", [providerId]);
+  // Use INSERT OR IGNORE so existing rows (including starred state) are
+  // preserved. Then delete rows for models that no longer appear remotely.
   for (const m of models) {
     await db.execute(
-      "INSERT OR IGNORE INTO models (provider_id, model_id, label, created_at) VALUES (?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO models (provider_id, model_id, label, created_at, starred, is_default) VALUES (?, ?, ?, ?, 0, 0)",
       [providerId, m.modelId, m.label ?? null, now]
     );
   }
+  // Remove models that are no longer returned by the provider, but keep
+  // starred models even if they disappear from the remote list.
+  const remoteIds = models.map((m) => m.modelId);
+  if (remoteIds.length > 0) {
+    const placeholders = remoteIds.map(() => "?").join(", ");
+    await db.execute(
+      `DELETE FROM models WHERE provider_id = ? AND starred = 0 AND model_id NOT IN (${placeholders})`,
+      [providerId, ...remoteIds]
+    );
+  } else {
+    await db.execute(
+      "DELETE FROM models WHERE provider_id = ? AND starred = 0",
+      [providerId]
+    );
+  }
+}
+
+export async function toggleModelStar(
+  modelDbId: number
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    "UPDATE models SET starred = CASE WHEN starred = 1 THEN 0 ELSE 1 END WHERE id = ?",
+    [modelDbId]
+  );
+}
+
+export async function setDefaultModel(
+  providerId: string,
+  modelId: string
+): Promise<void> {
+  const db = await getDb();
+  // Only one model globally can be the default — clear all first.
+  await db.execute("UPDATE models SET is_default = 0");
+  await db.execute(
+    "UPDATE models SET is_default = 1 WHERE provider_id = ? AND model_id = ?",
+    [providerId, modelId]
+  );
+}
+
+export async function unsetDefaultModel(): Promise<void> {
+  const db = await getDb();
+  await db.execute("UPDATE models SET is_default = 0");
+}
+
+export async function getDefaultModel(): Promise<ModelEntry | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM models WHERE is_default = 1 LIMIT 1"
+  );
+  return rows.length > 0 ? rowToModel(rows[0]) : null;
 }
 
 // ---- Chats ----

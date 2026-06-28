@@ -30,6 +30,7 @@ export function HomeView({
 
   const providers = useProvidersStore((s) => s.providers);
   const modelsByProvider = useProvidersStore((s) => s.modelsByProvider);
+  const getDefaultModel = useProvidersStore((s) => s.getDefaultModel);
 
   const [input, setInput] = useState("");
   const [pendingFolders, setPendingFolders] = useState<string[]>([]);
@@ -51,14 +52,21 @@ export function HomeView({
   const hasProvider = providers.length > 0;
   const recent = chats.slice(0, 6);
 
-  // Default to the first available provider's first model so the user can
-  // start typing immediately.
+  // Default model: prefer the user-set default model; fall back to first
+  // available provider's first model so the user can start typing immediately.
   const defaultModel = useMemo(() => {
+    const storedDefault = getDefaultModel();
+    if (storedDefault) {
+      return {
+        providerId: storedDefault.providerId,
+        modelId: storedDefault.modelId,
+      };
+    }
     if (providers.length === 0) return null;
     const p = providers[0];
     const models = modelsByProvider[p.id] ?? [];
     return { providerId: p.id, modelId: models[0]?.modelId ?? null };
-  }, [providers, modelsByProvider]);
+  }, [providers, modelsByProvider, getDefaultModel]);
 
   useEffect(() => {
     if (!providerId && defaultModel) {

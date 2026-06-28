@@ -21,6 +21,12 @@ pub fn run() {
             sql: include_str!("../migrations/002_agents.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "model preferences: starred and is_default columns on models",
+            sql: include_str!("../migrations/003_model_preferences.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

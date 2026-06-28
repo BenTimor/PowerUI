@@ -27,6 +27,9 @@ interface ProvidersState {
   /** Flat list of {provider, model} pairs for selectors. */
   allProviderModels: () => ProviderModel[];
   getProvider: (id: string | null) => Provider | undefined;
+  toggleModelStar: (modelDbId: number) => Promise<void>;
+  setDefaultModel: (providerId: string, modelId: string) => Promise<void>;
+  getDefaultModel: () => { providerId: string; modelId: string } | null;
 }
 
 export const useProvidersStore = create<ProvidersState>((set, get) => ({
@@ -147,5 +150,38 @@ export const useProvidersStore = create<ProvidersState>((set, get) => ({
   getProvider: (id) => {
     if (!id) return undefined;
     return get().providers.find((p) => p.id === id);
+  },
+
+  toggleModelStar: async (modelDbId) => {
+    await db.toggleModelStar(modelDbId);
+    // Refresh all providers' models to reflect the change.
+    const { providers } = get();
+    const modelsByProvider: Record<string, ModelEntry[]> = {};
+    for (const p of providers) {
+      modelsByProvider[p.id] = await db.listModels(p.id);
+    }
+    set({ modelsByProvider });
+  },
+
+  setDefaultModel: async (providerId, modelId) => {
+    await db.setDefaultModel(providerId, modelId);
+    // Refresh all providers' models to reflect the default change.
+    const { providers } = get();
+    const modelsByProvider: Record<string, ModelEntry[]> = {};
+    for (const p of providers) {
+      modelsByProvider[p.id] = await db.listModels(p.id);
+    }
+    set({ modelsByProvider });
+  },
+
+  getDefaultModel: () => {
+    const { modelsByProvider } = get();
+    for (const pid of Object.keys(modelsByProvider)) {
+      const found = modelsByProvider[pid].find((m) => m.isDefault);
+      if (found) {
+        return { providerId: found.providerId, modelId: found.modelId };
+      }
+    }
+    return null;
   },
 }));

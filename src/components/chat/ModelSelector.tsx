@@ -1,5 +1,12 @@
 import { useMemo, useState } from "react";
-import { ChevronsUpDown, Loader2, Search, Settings2 } from "lucide-react";
+import {
+  ChevronsUpDown,
+  Loader2,
+  Pin,
+  Search,
+  Settings2,
+  Star,
+} from "lucide-react";
 
 import { useProvidersStore } from "@/stores/providersStore";
 import { Button } from "@/components/ui/button";
@@ -9,6 +16,12 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import type { ModelEntry } from "@/types";
+
+interface ModelRow {
+  providerId: string;
+  model: ModelEntry;
+}
 
 export function ModelSelector({
   providerId,
@@ -28,6 +41,8 @@ export function ModelSelector({
   const refreshing = useProvidersStore((s) => s.refreshing);
   const refreshModels = useProvidersStore((s) => s.refreshModels);
   const getProvider = useProvidersStore((s) => s.getProvider);
+  const toggleModelStar = useProvidersStore((s) => s.toggleModelStar);
+  const setDefaultModel = useProvidersStore((s) => s.setDefaultModel);
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -35,6 +50,32 @@ export function ModelSelector({
   const provider = providerId ? getProvider(providerId) : undefined;
   const anyRefreshing = Object.values(refreshing).some(Boolean);
 
+  // Build the full flat list of models with their provider id.
+  const allRows = useMemo<ModelRow[]>(() => {
+    const rows: ModelRow[] = [];
+    for (const p of providers) {
+      const models = modelsByProvider[p.id] ?? [];
+      for (const m of models) {
+        rows.push({ providerId: p.id, model: m });
+      }
+    }
+    return rows;
+  }, [providers, modelsByProvider]);
+
+  // Starred models shown in a dedicated "Starred" section at the top.
+  const starredRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return allRows.filter(({ model: m }) => {
+      if (!m.starred) return false;
+      if (!q) return true;
+      return (
+        m.modelId.toLowerCase().includes(q) ||
+        (m.label ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [allRows, query]);
+
+  // Provider-grouped models (excluding starred since they're shown at top).
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
     return providers
@@ -54,6 +95,16 @@ export function ModelSelector({
 
   const triggerLabel = modelId ? modelId : "Select a model";
 
+  const handleToggleStar = (e: React.MouseEvent, modelDbId: number) => {
+    e.stopPropagation();
+    void toggleModelStar(modelDbId);
+  };
+
+  const handleSetDefault = (e: React.MouseEvent, pid: string, mid: string) => {
+    e.stopPropagation();
+    void setDefaultModel(pid, mid);
+  };
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -64,8 +115,8 @@ export function ModelSelector({
           className={cn(
             "h-8 max-w-[280px] justify-between gap-2 px-3 text-xs",
             className
-          )
-        }>
+          )}
+        >
           <span className="truncate font-normal">
             {provider && (
               <span className="text-muted-foreground">
@@ -99,12 +150,41 @@ export function ModelSelector({
           )}
 
           {providers.length > 0 &&
-            groups.length === 0 && (
+            groups.length === 0 &&
+            starredRows.length === 0 && (
               <div className="px-3 py-6 text-center text-sm text-muted-foreground">
                 No models found. Refresh a provider to fetch models, or type a
                 custom model id below.
               </div>
             )}
+
+          {/* Starred section */}
+          {starredRows.length > 0 && (
+            <div className="px-1 py-1">
+              <div className="px-2 py-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  ★ Starred
+                </span>
+              </div>
+              {starredRows.map(({ providerId: pid, model: m }) => (
+                <ModelRowItem
+                  key={`starred:${pid}:${m.modelId}`}
+                  modelId={m.modelId}
+                  label={m.label || m.modelId}
+                  selected={providerId === pid && modelId === m.modelId}
+                  isDefault={m.isDefault}
+                  starred={m.starred}
+                  onSelect={() => {
+                    onSelect(pid, m.modelId);
+                    setQuery("");
+                    setOpen(false);
+                  }}
+                  onToggleStar={(e) => handleToggleStar(e, m.id)}
+                  onSetDefault={(e) => handleSetDefault(e, pid, m.modelId)}
+                />
+              ))}
+            </div>
+          )}
 
           {groups.map(({ provider: p, models }) => (
             <div key={p.id} className="px-1 py-1">
@@ -125,26 +205,23 @@ export function ModelSelector({
                   )}
                 </button>
               </div>
-              {models.map((m) => {
-                const selected =
-                  providerId === p.id && modelId === m.modelId;
-                return (
-                  <button
-                    key={`${p.id}:${m.modelId}`}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
-                      selected && "bg-accent"
-                    )}
-                    onClick={() => {
-                      onSelect(p.id, m.modelId);
-                      setQuery("");
-                      setOpen(false);
-                    }}
-                  >
-                    <span className="truncate">{m.label || m.modelId}</span>
-                  </button>
-                );
-              })}
+              {models.map((m) => (
+                <ModelRowItem
+                  key={`${p.id}:${m.modelId}`}
+                  modelId={m.modelId}
+                  label={m.label || m.modelId}
+                  selected={providerId === p.id && modelId === m.modelId}
+                  isDefault={m.isDefault}
+                  starred={m.starred}
+                  onSelect={() => {
+                    onSelect(p.id, m.modelId);
+                    setQuery("");
+                    setOpen(false);
+                  }}
+                  onToggleStar={(e) => handleToggleStar(e, m.id)}
+                  onSetDefault={(e) => handleSetDefault(e, p.id, m.modelId)}
+                />
+              ))}
             </div>
           ))}
         </div>
@@ -184,6 +261,78 @@ export function ModelSelector({
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** A single model row inside the dropdown. */
+function ModelRowItem({
+  modelId: _modelId,
+  label,
+  selected,
+  isDefault,
+  starred,
+  onSelect,
+  onToggleStar,
+  onSetDefault,
+}: {
+  modelId: string;
+  label: string;
+  selected: boolean;
+  isDefault: boolean;
+  starred: boolean;
+  onSelect: () => void;
+  onToggleStar: (e: React.MouseEvent) => void;
+  onSetDefault: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
+        selected && "bg-accent"
+      )}
+    >
+      <button
+        className="flex min-w-0 flex-1 items-center gap-2"
+        onClick={onSelect}
+      >
+        {isDefault && (
+          <span
+            className="shrink-0 text-[10px] font-medium uppercase text-primary"
+            title="Default model"
+          >
+            default
+          </span>
+        )}
+        <span className="truncate">{label}</span>
+      </button>
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+          onClick={onSetDefault}
+          title={isDefault ? "Unset as default" : "Set as default model"}
+        >
+          <Pin
+            className={cn(
+              "h-3.5 w-3.5 transition-transform",
+              isDefault && "text-primary",
+              isDefault && "-rotate-45"
+            )}
+          />
+        </button>
+        <button
+          className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+          onClick={onToggleStar}
+          title={starred ? "Unstar" : "Star"}
+        >
+          <Star
+            className={cn(
+              "h-3.5 w-3.5",
+              starred && "fill-amber-400 text-amber-400"
+            )}
+          />
+        </button>
+      </div>
+    </div>
   );
 }
 
