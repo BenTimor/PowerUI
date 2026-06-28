@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { ArrowUp, FolderPlus, MessageSquare, Sparkles, X } from "lucide-react";
 
@@ -33,6 +33,16 @@ export function HomeView({
 
   const [input, setInput] = useState("");
   const [pendingFolders, setPendingFolders] = useState<string[]>([]);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow the input to fit its content (capped so it never takes over
+  // the whole home layout). Re-runs whenever the text changes.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [input]);
 
   // Pending provider/model selection for the next chat created from here.
   const [providerId, setProviderId] = useState<string | null>(null);
@@ -116,12 +126,13 @@ export function HomeView({
               {/* Quick-send: creates a chat on submit (user-initiated) */}
               <div className="relative rounded-xl border bg-background focus-within:ring-1 focus-within:ring-ring">
                 <Textarea
+                  ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Ask anything to start a new chat…"
                   rows={1}
-                  className="min-h-[52px] resize-none border-0 bg-transparent pr-11 shadow-none focus-visible:ring-0"
+                  className="max-h-[220px] min-h-[52px] resize-none overflow-y-auto border-0 bg-transparent pr-11 shadow-none focus-visible:ring-0"
                 />
                 <div className="absolute bottom-2 right-2">
                   <Button
